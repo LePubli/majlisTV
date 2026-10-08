@@ -1,123 +1,95 @@
-# Majlis TV — Étape 1A : socle (infrastructure + API + authentification)
+# Majlis TV — Étape 1A : socle (API + authentification)
 
-Nom provisoire : « Majlis TV » (modifiable via `APP_NAME` dans `.env`).
+Nom provisoire : « Majlis TV » (modifiable via `APP_NAME`).
 
 ## Description
-Plateforme de conférences vidéo à la demande. Cette étape fournit :
-- PostgreSQL + API Node.js (Fastify) en Docker Compose
-- inscription / connexion (JWT, mots de passe hachés avec bcrypt)
-- rôles : `user`, `organizer`, `admin` (le statut abonné viendra à l'étape paiement)
-- migrations SQL automatiques, création de l'admin au premier démarrage
-- protections : helmet, CORS, limitation de débit sur les routes sensibles
+Plateforme de conférences vidéo à la demande. Cette étape fournit une API Node.js (Fastify) + PostgreSQL :
+- inscription / connexion (JWT, mots de passe bcrypt)
+- rôles `user`, `organizer`, `admin` (le statut abonné viendra avec le paiement)
+- migrations SQL automatiques au démarrage, création de l'admin initial
+- helmet, CORS, limitation de débit sur les routes sensibles
 
-Hors de cette étape (prévu ensuite) : front-end Next.js (thème sombre bleu ciel, i18n + arabe RTL), upload, vidéo, paiement.
+À venir : front-end (thème sombre bleu ciel, i18n + arabe RTL), upload, vidéo, paiement.
 
 ## Arborescence
 ```
-majlis-tv/
-├── Dockerfile          (utilisé par DockPanel Git Deploy)
-├── docker-compose.yml  (utilisé en local ou en ligne de commande)
+├── Dockerfile              (utilisé par DockPanel Git Deploy)
+├── .dockerignore
 ├── .env.example
 ├── README.md
+├── local/docker-compose.yml   (test local uniquement)
+├── web/                       (étape 1B : front-end Next.js, voir web/README.md)
 └── api/
     ├── Dockerfile
     ├── package.json
     ├── migrations/001_init.sql
-    └── src/
-        ├── index.js        (serveur, plugins, hooks d'auth)
-        ├── config.js       (variables d'environnement)
-        ├── db.js           (PostgreSQL, migrations, admin initial)
-        └── routes/
-            ├── auth.js     (register, login, me)
-            └── admin.js    (liste des utilisateurs, changement de rôle)
+    └── src/ index.js, config.js, db.js, routes/auth.js, routes/admin.js
 ```
+Important : ne pas remettre de `docker-compose.yml` à la racine du dépôt, DockPanel passerait en mode Compose et refuserait le build.
 
-## Prérequis (Ubuntu 24)
-```bash
-curl -fsSL https://get.docker.com | sudo sh
-sudo usermod -aG docker $USER   # puis se reconnecter
-docker compose version
-```
+## Prérequis
+Docker et Docker Compose (Ubuntu 24 : `curl -fsSL https://get.docker.com | sudo sh`), pour le test local. Pour la production : un VPS avec DockPanel.
 
-## Installation et configuration
+## Configuration (.env)
 ```bash
 cp .env.example .env
-nano .env
 ```
-À modifier obligatoirement : `POSTGRES_PASSWORD` (alphanumérique), `JWT_SECRET` (`openssl rand -hex 32`), `ADMIN_EMAIL` et `ADMIN_PASSWORD`.
+Modifier `POSTGRES_PASSWORD` (alphanumérique), `JWT_SECRET` (`openssl rand -hex 32`, 32 caractères minimum), `ADMIN_EMAIL`, `ADMIN_PASSWORD`.
 
-## Lancement
+## Lancement en local
 ```bash
-docker compose up -d --build
+cd local
+docker compose --env-file ../.env up -d --build
 docker compose logs -f api
 ```
-L'API écoute sur `http://127.0.0.1:3000`.
+API sur `http://127.0.0.1:3000`.
 
 ## Exemples d'utilisation
+Remplacer l'URL de base par ton domaine en production.
 ```bash
 curl http://127.0.0.1:3000/health
 curl http://127.0.0.1:3000/config
 
-# Inscription
 curl -X POST http://127.0.0.1:3000/auth/register -H 'Content-Type: application/json' \
   -d '{"email":"test@example.com","password":"motdepasse123","name":"Test","locale":"ar"}'
 
-# Connexion admin (récupérer le token)
 curl -X POST http://127.0.0.1:3000/auth/login -H 'Content-Type: application/json' \
   -d '{"email":"admin@example.com","password":"VOTRE_MOT_DE_PASSE"}'
 
-# Profil et liste des utilisateurs (remplacer TOKEN)
 curl http://127.0.0.1:3000/auth/me -H 'Authorization: Bearer TOKEN'
 curl http://127.0.0.1:3000/admin/users -H 'Authorization: Bearer TOKEN'
-
-# Donner le rôle organisateur à un utilisateur
-curl -X PATCH http://127.0.0.1:3000/admin/users/ID_UTILISATEUR/role \
-  -H 'Authorization: Bearer TOKEN' -H 'Content-Type: application/json' -d '{"role":"organizer"}'
+curl -X PATCH http://127.0.0.1:3000/admin/users/ID/role -H 'Authorization: Bearer TOKEN' \
+  -H 'Content-Type: application/json' -d '{"role":"organizer"}'
 ```
+Note : `GET /` renvoie 404, c'est normal (pas de page d'accueil dans l'API).
 
-## Debug
-- Logs : `docker compose logs -f api` ou `docker compose logs db`
-- État : `docker compose ps`
-- Base : `docker compose exec db psql -U majlis -d majlis -c 'SELECT email, role FROM users;'`
-- Repartir de zéro (efface les données) : `docker compose down -v`
-- L'API refuse de démarrer si `JWT_SECRET` fait moins de 32 caractères.
-
-## Déploiement avec DockPanel — Git Deploy (méthode recommandée)
-Git Deploy construit un seul conteneur à partir du `Dockerfile` racine, sans stockage persistant : la base PostgreSQL doit donc être créée à part.
-
-1. Pousser le projet sur GitHub (branche `main`).
-2. DockPanel → **Databases** : créer une base PostgreSQL et noter hôte, port, utilisateur, mot de passe.
-3. DockPanel → **Git Deploy** → New Deploy :
-   - Name : `MajlisTV` (lettres, chiffres, tirets)
-   - Repository URL : l'URL `.git` du dépôt
-   - Branch : `main`
-   - Dockerfile Path : `Dockerfile`
-   - Container Port : `3000`
-   - Domain : ex. `api.tondomaine.fr` (le DNS doit pointer vers le VPS)
-4. Variables d'environnement (bouton « Paste .env ») :
+## Déploiement : DockPanel (Git Deploy) sur VPS Ubuntu 24
+1. **Base PostgreSQL** : DockPanel → Docker Apps → PostgreSQL (ex. `postgres-majlisstv`). Noter l'utilisateur, la base et le mot de passe (variables du conteneur).
+2. **Adresse du conteneur** :
+   ```bash
+   docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{$v.IPAddress}}{{"\n"}}{{end}}' dockpanel-app-postgres-majlisstv
+   docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' dockpanel-app-postgres-majlisstv | grep -E 'POSTGRES_(USER|DB)='
+   ```
+3. **Git Deploy → New Deploy** :
+   - Name : minuscules uniquement (ex. `majlistv`), sinon Docker refuse le nom d'image
+   - Repository URL, Branch `main`, Dockerfile Path `Dockerfile`, Container Port `3000`
+   - Domain : ton sous-domaine API (DNS vers le VPS), HTTPS avec certificat automatique
+4. **Variables d'environnement** (sans guillemets) :
 ```
-DATABASE_URL=postgres://UTILISATEUR:MOTDEPASSE@HOTE:PORT/NOMBASE
-JWT_SECRET=<résultat de : openssl rand -hex 32>
+DATABASE_URL=postgres://UTILISATEUR:MOTDEPASSE@172.17.0.3:5432/NOMBASE
+JWT_SECRET=<openssl rand -hex 32>
 APP_NAME=Majlis TV
 CORS_ORIGIN=https://url-du-futur-front
 ADMIN_EMAIL=ton@email.fr
 ADMIN_PASSWORD=un_mot_de_passe_long
 ```
-5. Lancer le déploiement, puis ouvrir `https://api.tondomaine.fr/health` : réponse attendue `{"status":"ok"}`.
+   Si le mot de passe contient `@ / # ? : %`, les encoder (`%40 %2F %23 %3F %3A %25`).
+5. Create, puis Deploy. Vérifier `https://ton-domaine/health` → `{"status":"ok"}`.
 
-Si l'API ne se connecte pas à la base, lire les logs du déploiement : l'erreur de connexion y est affichée. Utiliser l'hôte et le port indiqués par la page Databases.
-Les fichiers envoyés plus tard (vidéos) ne pourront pas être stockés dans le conteneur : prévoir un stockage séparé (MinIO) à l'étape upload.
-
-## Alternative : docker compose en ligne de commande sur le VPS
-1. Si DockPanel n'est pas encore installé : `curl -sL https://dockpanel.dev/install.sh | sudo bash` (le panneau est ensuite sur le port 8443).
-2. Copier le projet sur le serveur, par exemple dans `/opt/majlis-tv` (`git clone` de ton dépôt, ou `scp -r majlis-tv user@serveur:/opt/`).
-3. Configurer : `cd /opt/majlis-tv && cp .env.example .env && nano .env`
-4. Démarrer : `docker compose up -d --build`
-5. Dans DockPanel, créer un site en reverse proxy vers `http://127.0.0.1:3000` avec ton domaine (ex. `api.tondomaine.fr`) et activer le certificat SSL Let's Encrypt. Les intitulés exacts des menus peuvent varier selon la version du panneau.
-6. Mettre `CORS_ORIGIN` à l'URL du futur front-end, puis `docker compose up -d`.
-7. Mise à jour : `git pull && docker compose up -d --build`
-
-Notes :
-- L'API n'écoute que sur `127.0.0.1:3000` : seul le proxy du panneau la publie sur Internet.
-- Un stack lancé en ligne de commande peut ne pas apparaître comme « stack géré » dans le panneau. Pour tout piloter depuis DockPanel, utilise sa fonction de déploiement Git ou de stack Compose (le `docker-compose.yml` construit l'image depuis `./api`, donc le dépôt complet doit être disponible).
-- Sauvegardes : la base est dans le volume Docker `db_data` ; exemple d'export : `docker compose exec db pg_dump -U majlis majlis > sauvegarde.sql`
+## Debug
+- Logs : `docker logs --tail 50 dockpanel-git-majlistv`
+- 502 Bad Gateway : le conteneur redémarre en boucle, lire les logs. `Invalid URL` = `DATABASE_URL` mal formée ; `password authentication failed` = mauvais mot de passe ; `ECONNREFUSED` = mauvaise IP ou port de la base.
+- L'IP du conteneur PostgreSQL peut changer s'il est recréé : refaire l'étape 2 et mettre à jour `DATABASE_URL`.
+- « Deploy blocked: active critical/major incident » : résoudre les incidents actifs dans DockPanel (page Incidents).
+- « Docker Compose refused » : supprimer tout `docker-compose.yml` de la racine du dépôt.
+- Fichiers uploadés plus tard (vidéos) : prévoir un stockage séparé (MinIO), le conteneur Git Deploy n'a pas de stockage persistant.
