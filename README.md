@@ -15,7 +15,8 @@ Hors de cette étape (prévu ensuite) : front-end Next.js (thème sombre bleu ci
 ## Arborescence
 ```
 majlis-tv/
-├── docker-compose.yml
+├── Dockerfile          (utilisé par DockPanel Git Deploy)
+├── docker-compose.yml  (utilisé en local ou en ligne de commande)
 ├── .env.example
 ├── README.md
 └── api/
@@ -81,7 +82,33 @@ curl -X PATCH http://127.0.0.1:3000/admin/users/ID_UTILISATEUR/role \
 - Repartir de zéro (efface les données) : `docker compose down -v`
 - L'API refuse de démarrer si `JWT_SECRET` fait moins de 32 caractères.
 
-## Déploiement avec DockPanel (VPS Ubuntu 24)
+## Déploiement avec DockPanel — Git Deploy (méthode recommandée)
+Git Deploy construit un seul conteneur à partir du `Dockerfile` racine, sans stockage persistant : la base PostgreSQL doit donc être créée à part.
+
+1. Pousser le projet sur GitHub (branche `main`).
+2. DockPanel → **Databases** : créer une base PostgreSQL et noter hôte, port, utilisateur, mot de passe.
+3. DockPanel → **Git Deploy** → New Deploy :
+   - Name : `MajlisTV` (lettres, chiffres, tirets)
+   - Repository URL : l'URL `.git` du dépôt
+   - Branch : `main`
+   - Dockerfile Path : `Dockerfile`
+   - Container Port : `3000`
+   - Domain : ex. `api.tondomaine.fr` (le DNS doit pointer vers le VPS)
+4. Variables d'environnement (bouton « Paste .env ») :
+```
+DATABASE_URL=postgres://UTILISATEUR:MOTDEPASSE@HOTE:PORT/NOMBASE
+JWT_SECRET=<résultat de : openssl rand -hex 32>
+APP_NAME=Majlis TV
+CORS_ORIGIN=https://url-du-futur-front
+ADMIN_EMAIL=ton@email.fr
+ADMIN_PASSWORD=un_mot_de_passe_long
+```
+5. Lancer le déploiement, puis ouvrir `https://api.tondomaine.fr/health` : réponse attendue `{"status":"ok"}`.
+
+Si l'API ne se connecte pas à la base, lire les logs du déploiement : l'erreur de connexion y est affichée. Utiliser l'hôte et le port indiqués par la page Databases.
+Les fichiers envoyés plus tard (vidéos) ne pourront pas être stockés dans le conteneur : prévoir un stockage séparé (MinIO) à l'étape upload.
+
+## Alternative : docker compose en ligne de commande sur le VPS
 1. Si DockPanel n'est pas encore installé : `curl -sL https://dockpanel.dev/install.sh | sudo bash` (le panneau est ensuite sur le port 8443).
 2. Copier le projet sur le serveur, par exemple dans `/opt/majlis-tv` (`git clone` de ton dépôt, ou `scp -r majlis-tv user@serveur:/opt/`).
 3. Configurer : `cd /opt/majlis-tv && cp .env.example .env && nano .env`
