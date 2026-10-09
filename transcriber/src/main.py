@@ -207,7 +207,10 @@ def process(job):
 
         elapsed = time.time() - started
         if not rows:
-            raise RuntimeError("Aucune parole détectée")
+            # Vidéo sans parole (musique, silence, image fixe) : ce n'est pas une panne, inutile de réessayer.
+            query("UPDATE talks SET transcript_status = 'unavailable', transcript_progress = 0, transcript_error = NULL WHERE id = %s", (talk_id,))
+            log(f"[{talk_id}] aucune parole détectée : transcription non disponible pour cette vidéo")
+            return
         full_text = " ".join(r[5] for r in rows)
         try:
             with db().cursor() as cur:
