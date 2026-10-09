@@ -10,7 +10,8 @@ import { pool } from '../db.js';
 import { config } from '../config.js';
 import { storage } from '../storage.js';
 
-const PART_SIZE = 64 * 1024 * 1024; // 64 Mo par morceau
+// 32 Mo par morceau : reste sous la limite de 64 Mo de Nginx (client_max_body_size posée par DockPanel).
+const PART_SIZE = 32 * 1024 * 1024;
 const bucket = config.s3.bucket;
 
 const startSchema = z.object({
