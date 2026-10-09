@@ -116,3 +116,6 @@ curl -X PATCH https://api-majlisstv.le-publicitaire.fr/admin/users/ID_UTILISATEU
 2. Se reconnecter avec ce compte : le lien « Mes conférences » apparaît. Ajouter une conférence avec un lien YouTube, puis vérifier le catalogue.
 
 Limites de cette étape : l'accès « premium » est seulement un marquage (le blocage viendra avec l'abonnement), les catégories sont en français, et la miniature n'existe que pour YouTube.
+
+## Étape 2B-1 : stockage vidéo Garage
+Voir `garage/README.md` (déploiement DockPanel et initialisation). Le code d'upload arrive à l'étape 2B-2.
