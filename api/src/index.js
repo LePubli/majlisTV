@@ -9,6 +9,8 @@ import { pool, migrate, ensureAdmin } from './db.js';
 import authRoutes from './routes/auth.js';
 import adminRoutes from './routes/admin.js';
 import talksRoutes from './routes/talks.js';
+import uploadRoutes from './routes/uploads.js';
+import { ensureCors } from './storage.js';
 
 const app = Fastify({ logger: true, trustProxy: true });
 
@@ -55,7 +57,9 @@ app.get('/config', async () => ({ appName: config.appName }));
 await app.register(authRoutes);
 await app.register(adminRoutes);
 await app.register(talksRoutes);
+await app.register(uploadRoutes);
 
 await migrate();
 await ensureAdmin();
+await ensureCors();
 await app.listen({ port: config.port, host: '0.0.0.0' });

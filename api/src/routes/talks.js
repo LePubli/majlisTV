@@ -1,6 +1,7 @@
 // Catalogue public + gestion des conférences par les organisateurs.
 import { z } from 'zod';
 import { pool } from '../db.js';
+import { presignGet, deleteObject } from '../storage.js';
 
 // Extrait la plateforme et l'identifiant d'une URL YouTube ou Vimeo.
 export function parseVideoUrl(raw) {
@@ -38,7 +39,8 @@ const talkSchema = z.object({
   language: z.string().regex(/^[a-z]{2}(-[A-Z]{2})?$/).default('fr'),
   categoryId: z.number().int().positive().optional(),
   access: z.enum(['free', 'premium']).default('free'),
-  videoUrl: z.string().url().max(500),
+  videoUrl: z.string().url().max(500).optional(),
+  uploadId: z.string().uuid().optional(),
 });
 
 const SELECT = `SELECT t.id, t.title, t.description, t.speaker, t.language, t.access, t.source,
@@ -78,8 +80,20 @@ export default async function talksRoutes(app) {
   app.get('/talks/:id', async (req, reply) => {
     const { id } = idSchema.parse(req.params);
     const { rows } = await pool.query(`${SELECT} WHERE t.id = $1`, [id]);
-    if (!rows[0]) return reply.code(404).send({ error: 'Conférence introuvable' });
-    return rows[0];
+    const talk = rows[0];
+    if (!talk) return reply.code(404).send({ error: 'Conférence introuvable' });
+    if (talk.source === 'upload') {
+      // Lien de lecture temporaire. Premium : réservé au propriétaire et aux admins jusqu'à l'étape abonnement.
+      let viewer = null;
+      try { viewer = await req.jwtVerify(); } catch { /* visiteur anonyme */ }
+      const owner = await pool.query('SELECT organizer_id FROM talks WHERE id = $1', [id]);
+      const allowed = talk.access === 'free'
+        || (viewer && (viewer.role === 'admin' || viewer.sub === owner.rows[0].organizer_id));
+      if (allowed) talk.videoUrl = await presignGet(talk.video_ref);
+      else talk.locked = true;
+      delete talk.video_ref;
+    }
+    return talk;
   });
 
   app.get('/me/talks', { preHandler: app.authenticate }, async (req) => {
@@ -89,8 +103,20 @@ export default async function talksRoutes(app) {
 
   app.post('/talks', organizer, async (req, reply) => {
     const b = talkSchema.parse(req.body);
-    const video = parseVideoUrl(b.videoUrl);
-    if (!video) return reply.code(400).send({ error: 'Lien YouTube ou Vimeo non reconnu' });
+    let video;
+    if (b.uploadId) {
+      // Vidéo envoyée : doit appartenir à l'organisateur, être terminée et pas déjà utilisée.
+      const up = await pool.query(
+        `SELECT object_key FROM uploads u WHERE u.id = $1 AND u.organizer_id = $2 AND u.status = 'completed'
+         AND NOT EXISTS (SELECT 1 FROM talks t WHERE t.video_ref = u.object_key)`,
+        [b.uploadId, req.user.sub]
+      );
+      if (!up.rows[0]) return reply.code(400).send({ error: 'Upload introuvable ou déjà utilisé' });
+      video = { source: 'upload', ref: up.rows[0].object_key };
+    } else {
+      video = b.videoUrl ? parseVideoUrl(b.videoUrl) : null;
+      if (!video) return reply.code(400).send({ error: 'Lien YouTube ou Vimeo non reconnu' });
+    }
     try {
       const { rows } = await pool.query(
         `INSERT INTO talks(organizer_id, title, description, speaker, language, category_id, access, source, video_ref)
@@ -108,10 +134,15 @@ export default async function talksRoutes(app) {
   app.delete('/talks/:id', { preHandler: app.authenticate }, async (req, reply) => {
     const { id } = idSchema.parse(req.params);
     const admin = req.user.role === 'admin';
-    const { rowCount } = await pool.query(
-      'DELETE FROM talks WHERE id = $1 AND ($3 OR organizer_id = $2)', [id, req.user.sub, admin]
+    const { rows } = await pool.query(
+      'DELETE FROM talks WHERE id = $1 AND ($3 OR organizer_id = $2) RETURNING source, video_ref',
+      [id, req.user.sub, admin]
     );
-    if (!rowCount) return reply.code(404).send({ error: 'Conférence introuvable' });
+    if (!rows[0]) return reply.code(404).send({ error: 'Conférence introuvable' });
+    if (rows[0].source === 'upload') {
+      await deleteObject(rows[0].video_ref).catch(() => {});
+      await pool.query('DELETE FROM uploads WHERE object_key = $1', [rows[0].video_ref]);
+    }
     return reply.code(204).send();
   });
 }

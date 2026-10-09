@@ -15,6 +15,14 @@ export const config = {
   jwtSecret: required('JWT_SECRET'),
   jwtExpires: process.env.JWT_EXPIRES || '7d',
   corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:3001',
+  s3: {
+    endpoint: process.env.S3_ENDPOINT,
+    region: process.env.S3_REGION || 'garage',
+    bucket: process.env.S3_BUCKET || 'majlis-videos',
+    accessKey: process.env.S3_ACCESS_KEY,
+    secretKey: process.env.S3_SECRET_KEY,
+  },
+  maxUploadBytes: Number(process.env.MAX_UPLOAD_GB || 10) * 1024 ** 3,
   adminEmail: process.env.ADMIN_EMAIL,
   adminPassword: process.env.ADMIN_PASSWORD,
 };

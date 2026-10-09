@@ -119,3 +119,28 @@ Limites de cette étape : l'accès « premium » est seulement un marquage (le b
 
 ## Étape 2B-1 : stockage vidéo Garage
 Voir `garage/README.md` (déploiement DockPanel et initialisation). Le code d'upload arrive à l'étape 2B-2.
+
+## Étape 2B-2 : upload de vidéos vers Garage
+Nouveautés : upload par morceaux de 64 Mo directement du navigateur vers le stockage (jusqu'à `MAX_UPLOAD_GB`, 10 par défaut), lecture par liens temporaires de 4 h, migration `003_uploads.sql`, CORS du bucket configuré automatiquement au démarrage de l'API.
+
+Variables à ajouter au déploiement `majlistv-api` (puis Deploy Now) :
+```
+S3_ENDPOINT=https://s3-majlisstv.le-publicitaire.fr
+S3_REGION=garage
+S3_BUCKET=majlis-videos
+S3_ACCESS_KEY=<Key ID de la clé majlis-api>
+S3_SECRET_KEY=<secret de la clé majlis-api>
+```
+Les logs de l'API doivent contenir `CORS du bucket configuré.` S'ils affichent `CORS du bucket non configuré`, voir Debug.
+
+Test préalable de la limite de taille de Nginx (réponse attendue : 403, pas 413) :
+```bash
+head -c 70M /dev/zero | curl -s -o /dev/null -w '%{http_code}\n' -X PUT --data-binary @- https://s3-majlisstv.le-publicitaire.fr/test
+```
+Si la réponse est 413 : dans le fichier Nginx du domaine `s3-majlisstv...` (dossier /etc/nginx/sites-enabled/), ajouter `client_max_body_size 0;` dans le bloc `server`, puis `nginx -t && systemctl reload nginx`.
+
+Debug :
+- Lecture impossible ou upload bloqué dans le navigateur : ouvrir la console (F12), onglet Réseau ; une erreur CORS signifie que la configuration du bucket n'a pas été appliquée.
+- Si l'API ne peut pas configurer le CORS (message dans les logs), l'appliquer avec un client S3 (par exemple awscli) sur le bucket `majlis-videos`, origine `https://majlisstv.le-publicitaire.fr`, méthodes GET/HEAD/PUT, en-tête exposé `ETag`.
+- Pas de conversion à cette étape : les fichiers MP4 se lisent directement, les autres formats peuvent échouer jusqu'à l'étape 3.
+- Les uploads abandonnés peuvent laisser des morceaux orphelins dans le bucket ; un nettoyage sera ajouté plus tard.
