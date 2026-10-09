@@ -1,6 +1,6 @@
 // Client S3 (Garage) : liens temporaires, suppression, CORS du bucket.
 import {
-  S3Client, GetObjectCommand, DeleteObjectCommand, PutBucketCorsCommand,
+  S3Client, GetObjectCommand, DeleteObjectCommand, DeleteObjectsCommand, ListObjectsV2Command, PutBucketCorsCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { config } from './config.js';
@@ -23,6 +23,17 @@ export const presignGet = (key) =>
   getSignedUrl(storage, new GetObjectCommand({ Bucket: bucket, Key: key }), { expiresIn: 4 * 3600 });
 
 export const deleteObject = (key) => storage.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+
+// Supprime tous les objets d'un préfixe (ex. hls/<id>/).
+export async function deletePrefix(prefix) {
+  let token;
+  do {
+    const page = await storage.send(new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, ContinuationToken: token }));
+    const objs = (page.Contents || []).map((o) => ({ Key: o.Key }));
+    if (objs.length) await storage.send(new DeleteObjectsCommand({ Bucket: bucket, Delete: { Objects: objs, Quiet: true } }));
+    token = page.IsTruncated ? page.NextContinuationToken : undefined;
+  } while (token);
+}
 
 // Autorise le navigateur du site à envoyer les morceaux (et à lire l'ETag, indispensable).
 export async function ensureCors() {

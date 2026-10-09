@@ -42,3 +42,7 @@ textarea { background: var(--bg); color: var(--text); border: 1px solid #333; bo
 .mine li { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #2a2a2a; }
 .player video { width: 100%; height: 100%; background: #000; }
 progress { width: 100%; accent-color: var(--accent); }
+
+.thumb .dur { position: absolute; right: 8px; bottom: 8px; background: rgba(0,0,0,.75); color: #fff; font-size: 12px; padding: 2px 6px; border-radius: 4px; }
+.mine .status { margin-inline-start: 12px; font-size: 13px; color: var(--accent, #38bdf8); }
+.mine .status.failed { color: #f87171; }

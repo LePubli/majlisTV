@@ -1,7 +1,8 @@
 // Catalogue public + gestion des conférences par les organisateurs.
 import { z } from 'zod';
 import { pool } from '../db.js';
-import { presignGet, deleteObject } from '../storage.js';
+import { presignGet, deleteObject, deletePrefix } from '../storage.js';
+import { makePlaybackToken } from '../playback.js';
 
 // Extrait la plateforme et l'identifiant d'une URL YouTube ou Vimeo.
 export function parseVideoUrl(raw) {
@@ -44,8 +45,19 @@ const talkSchema = z.object({
 });
 
 const SELECT = `SELECT t.id, t.title, t.description, t.speaker, t.language, t.access, t.source,
-  t.video_ref, t.category_id, c.name AS category, t.created_at
+  t.video_ref, t.category_id, c.name AS category, t.created_at,
+  t.video_status AS status, t.video_progress AS progress, t.duration_seconds AS "durationSeconds", t.poster_key
   FROM talks t LEFT JOIN categories c ON c.id = t.category_id`;
+
+// Remplace poster_key par un lien de miniature temporaire.
+async function withPosters(rows) {
+  for (const r of rows) {
+    r.posterUrl = r.poster_key ? await presignGet(r.poster_key) : null;
+    delete r.poster_key;
+    if (r.source === 'upload') delete r.video_ref; // clé de stockage interne
+  }
+  return rows;
+}
 
 export default async function talksRoutes(app) {
   const organizer = { preHandler: app.requireRole('organizer', 'admin') };
@@ -68,13 +80,14 @@ export default async function talksRoutes(app) {
     const p = listSchema.parse(req.query);
     const { rows } = await pool.query(
       `${SELECT}
-       WHERE ($1::text IS NULL OR t.title ILIKE '%' || $1 || '%' OR t.speaker ILIKE '%' || $1 || '%'
+       WHERE t.video_status = 'ready'
+         AND ($1::text IS NULL OR t.title ILIKE '%' || $1 || '%' OR t.speaker ILIKE '%' || $1 || '%'
               OR t.description ILIKE '%' || $1 || '%')
          AND ($2::int IS NULL OR t.category_id = $2)
        ORDER BY t.created_at DESC LIMIT $3 OFFSET $4`,
       [p.q ?? null, p.category ?? null, p.limit, p.offset]
     );
-    return rows;
+    return withPosters(rows);
   });
 
   app.get('/talks/:id', async (req, reply) => {
@@ -83,22 +96,24 @@ export default async function talksRoutes(app) {
     const talk = rows[0];
     if (!talk) return reply.code(404).send({ error: 'Conférence introuvable' });
     if (talk.source === 'upload') {
-      // Lien de lecture temporaire. Premium : réservé au propriétaire et aux admins jusqu'à l'étape abonnement.
+      // Premium : réservé au propriétaire et aux admins jusqu'à l'étape abonnement.
       let viewer = null;
       try { viewer = await req.jwtVerify(); } catch { /* visiteur anonyme */ }
       const owner = await pool.query('SELECT organizer_id FROM talks WHERE id = $1', [id]);
-      const allowed = talk.access === 'free'
-        || (viewer && (viewer.role === 'admin' || viewer.sub === owner.rows[0].organizer_id));
-      if (allowed) talk.videoUrl = await presignGet(talk.video_ref);
-      else talk.locked = true;
+      const isOwner = viewer && (viewer.role === 'admin' || viewer.sub === owner.rows[0].organizer_id);
+      const allowed = talk.access === 'free' || isOwner;
+      if (!allowed) talk.locked = true;
+      else if (talk.status === 'ready') talk.hlsPath = `/hls/${id}/master.m3u8?t=${encodeURIComponent(makePlaybackToken(id))}`;
+      else if (isOwner) talk.videoUrl = await presignGet(talk.video_ref); // aperçu du fichier d'origine pendant la conversion
       delete talk.video_ref;
     }
+    await withPosters([talk]);
     return talk;
   });
 
   app.get('/me/talks', { preHandler: app.authenticate }, async (req) => {
     const { rows } = await pool.query(`${SELECT} WHERE t.organizer_id = $1 ORDER BY t.created_at DESC`, [req.user.sub]);
-    return rows;
+    return withPosters(rows);
   });
 
   app.post('/talks', organizer, async (req, reply) => {
@@ -119,9 +134,10 @@ export default async function talksRoutes(app) {
     }
     try {
       const { rows } = await pool.query(
-        `INSERT INTO talks(organizer_id, title, description, speaker, language, category_id, access, source, video_ref)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
-        [req.user.sub, b.title, b.description, b.speaker, b.language, b.categoryId ?? null, b.access, video.source, video.ref]
+        `INSERT INTO talks(organizer_id, title, description, speaker, language, category_id, access, source, video_ref, video_status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
+        [req.user.sub, b.title, b.description, b.speaker, b.language, b.categoryId ?? null, b.access, video.source, video.ref,
+          video.source === 'upload' ? 'pending' : 'ready']
       );
       return reply.code(201).send(rows[0]);
     } catch (err) {
@@ -135,12 +151,13 @@ export default async function talksRoutes(app) {
     const { id } = idSchema.parse(req.params);
     const admin = req.user.role === 'admin';
     const { rows } = await pool.query(
-      'DELETE FROM talks WHERE id = $1 AND ($3 OR organizer_id = $2) RETURNING source, video_ref',
+      'DELETE FROM talks WHERE id = $1 AND ($3 OR organizer_id = $2) RETURNING id, source, video_ref',
       [id, req.user.sub, admin]
     );
     if (!rows[0]) return reply.code(404).send({ error: 'Conférence introuvable' });
     if (rows[0].source === 'upload') {
       await deleteObject(rows[0].video_ref).catch(() => {});
+      await deletePrefix(`hls/${rows[0].id}/`).catch(() => {});
       await pool.query('DELETE FROM uploads WHERE object_key = $1', [rows[0].video_ref]);
     }
     return reply.code(204).send();
