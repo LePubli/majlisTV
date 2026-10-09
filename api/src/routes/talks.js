@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { pool } from '../db.js';
 import { presignGet, deleteObject, deletePrefix } from '../storage.js';
 import { makePlaybackToken } from '../playback.js';
+import { TRANSLATION_LANGS, baseLang } from '../langs.js';
 
 // Extrait la plateforme et l'identifiant d'une URL YouTube ou Vimeo.
 export function parseVideoUrl(raw) {
@@ -42,13 +43,16 @@ const talkSchema = z.object({
   access: z.enum(['free', 'premium']).default('free'),
   videoUrl: z.string().url().max(500).optional(),
   uploadId: z.string().uuid().optional(),
+  // Langues des sous-titres à générer automatiquement (vidéos envoyées uniquement).
+  translateTo: z.array(z.enum(TRANSLATION_LANGS)).max(TRANSLATION_LANGS.length).default([]),
 });
 
-const SELECT = `SELECT t.id, t.title, t.description, t.speaker, t.language, t.access, t.source,
+const COLS = `t.id, t.title, t.description, t.speaker, t.language, t.access, t.source,
   t.video_ref, t.category_id, c.name AS category, t.created_at,
   t.video_status AS status, t.video_progress AS progress, t.duration_seconds AS "durationSeconds", t.poster_key,
-  t.transcript_status AS "transcriptStatus", t.transcript_progress AS "transcriptProgress"
-  FROM talks t LEFT JOIN categories c ON c.id = t.category_id`;
+  t.transcript_status AS "transcriptStatus", t.transcript_progress AS "transcriptProgress"`;
+const FROM = 'FROM talks t LEFT JOIN categories c ON c.id = t.category_id';
+const SELECT = `SELECT ${COLS} ${FROM}`;
 
 // Remplace poster_key par un lien de miniature temporaire.
 async function withPosters(rows) {
@@ -110,6 +114,9 @@ export default async function talksRoutes(app) {
         talk.playbackToken = makePlaybackToken(id);
         const langs = await pool.query('SELECT DISTINCT lang FROM transcript_segments WHERE talk_id = $1 ORDER BY lang', [id]);
         talk.tracks = langs.rows.map((r) => r.lang);
+        talk.translating = (await pool.query(
+          "SELECT EXISTS (SELECT 1 FROM transcript_translations WHERE talk_id = $1 AND status IN ('pending', 'processing')) AS x", [id]
+        )).rows[0].x;
         if (talk.status === 'ready') talk.hlsPath = `/hls/${id}/master.m3u8?t=${encodeURIComponent(talk.playbackToken)}`;
         else if (isOwner) talk.videoUrl = await presignGet(talk.video_ref); // aperçu du fichier d'origine pendant la conversion
       }
@@ -120,7 +127,13 @@ export default async function talksRoutes(app) {
   });
 
   app.get('/me/talks', { preHandler: app.authenticate }, async (req) => {
-    const { rows } = await pool.query(`${SELECT} WHERE t.organizer_id = $1 ORDER BY t.created_at DESC`, [req.user.sub]);
+    const { rows } = await pool.query(
+      `SELECT ${COLS}, t.transcript_language AS "transcriptLanguage",
+         (SELECT COALESCE(json_agg(json_build_object('lang', tr.lang, 'status', tr.status, 'progress', tr.progress) ORDER BY tr.lang), '[]'::json)
+            FROM transcript_translations tr WHERE tr.talk_id = t.id) AS translations
+       ${FROM} WHERE t.organizer_id = $1 ORDER BY t.created_at DESC`,
+      [req.user.sub]
+    );
     return withPosters(rows);
   });
 
@@ -147,11 +160,64 @@ export default async function talksRoutes(app) {
         [req.user.sub, b.title, b.description, b.speaker, b.language, b.categoryId ?? null, b.access, video.source, video.ref,
           video.source === 'upload' ? 'pending' : 'ready', video.source === 'upload' ? 'pending' : 'unavailable']
       );
+      if (video.source === 'upload' && b.translateTo.length) {
+        const langs = [...new Set(b.translateTo)].filter((l) => l !== baseLang(b.language));
+        if (langs.length) {
+          await pool.query('INSERT INTO transcript_translations(talk_id, lang) SELECT $1, unnest($2::text[])', [rows[0].id, langs]);
+        }
+      }
       return reply.code(201).send(rows[0]);
     } catch (err) {
       if (err.code === '23503') return reply.code(400).send({ error: 'Catégorie inconnue' });
       throw err;
     }
+  });
+
+  // Ajoute une langue de sous-titres à une conférence (ou relance une traduction échouée).
+  const trParams = z.object({ id: z.string().uuid(), lang: z.enum(TRANSLATION_LANGS) });
+  async function ownedUpload(req, reply, id) {
+    const { rows } = await pool.query('SELECT organizer_id, source, language, transcript_language FROM talks WHERE id = $1', [id]);
+    const talk = rows[0];
+    if (!talk || (req.user.role !== 'admin' && talk.organizer_id !== req.user.sub)) {
+      reply.code(404).send({ error: 'Conférence introuvable' });
+      return null;
+    }
+    if (talk.source !== 'upload') {
+      reply.code(400).send({ error: 'Les traductions concernent seulement les vidéos envoyées' });
+      return null;
+    }
+    return talk;
+  }
+
+  app.post('/talks/:id/translations', organizer, async (req, reply) => {
+    const { id } = idSchema.parse(req.params);
+    const { lang } = z.object({ lang: z.enum(TRANSLATION_LANGS) }).parse(req.body);
+    const talk = await ownedUpload(req, reply, id);
+    if (!talk) return;
+    if (lang === baseLang(talk.transcript_language || talk.language)) {
+      return reply.code(400).send({ error: 'Cette langue est celle de la conférence' });
+    }
+    await pool.query(
+      `INSERT INTO transcript_translations(talk_id, lang) VALUES ($1, $2)
+       ON CONFLICT (talk_id, lang) DO UPDATE
+         SET status = 'pending', progress = 0, error = NULL, attempts = 0, updated_at = now()
+         WHERE transcript_translations.status = 'failed'`,
+      [id, lang]
+    );
+    return reply.code(202).send({ lang, status: 'pending' });
+  });
+
+  // Supprime une traduction (jamais la langue d'origine).
+  app.delete('/talks/:id/translations/:lang', organizer, async (req, reply) => {
+    const { id, lang } = trParams.parse(req.params);
+    const talk = await ownedUpload(req, reply, id);
+    if (!talk) return;
+    if (lang === baseLang(talk.transcript_language || talk.language)) {
+      return reply.code(400).send({ error: "La langue d'origine ne peut pas être supprimée" });
+    }
+    await pool.query('DELETE FROM transcript_translations WHERE talk_id = $1 AND lang = $2', [id, lang]);
+    await pool.query('DELETE FROM transcript_segments WHERE talk_id = $1 AND lang = $2', [id, lang]);
+    return reply.code(204).send();
   });
 
   // Un organisateur supprime ses conférences ; un admin peut supprimer toutes les conférences.

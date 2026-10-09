@@ -6,7 +6,7 @@ Service qui transcrit automatiquement les conférences hébergées : il prend le
 - des **sous-titres** activables dans le lecteur (WebVTT généré à la volée par l'API) ;
 - la **recherche du catalogue** étendue au contenu parlé.
 
-Cycle de vie : `pending` → `processing` (progression en %) → `ready` ; `failed` après 3 tentatives ; `unavailable` pour les liens YouTube/Vimeo et les vidéos sans piste audio.
+Cycle de vie : `pending` → `processing` (progression en %) → `ready` ; `failed` après 3 tentatives ; `unavailable` pour les liens YouTube/Vimeo, les vidéos sans piste audio et les vidéos sans parole.
 
 ## Prérequis
 - API déployée avec la migration `005_transcripts.sql` (appliquée au démarrage de l'API) : **déployer l'API avant le transcripteur**.
@@ -59,8 +59,11 @@ curl -s http://127.0.0.1:7040/health                 # adapter le port hôte
 ```
 Les conférences déjà converties sont prises automatiquement (statut `pending` par défaut).
 
+## Dépendances épinglées
+`requirements.txt` fixe `av==14.2.0` et `huggingface_hub<1.0` : `faster-whisper 1.1.1` n'est pas compatible avec les versions plus récentes de ces bibliothèques (erreurs `No module named 'requests'` puis `metadata_errors`). Ne pas les mettre à jour sans tester une transcription complète.
+
 ## Utilisation
-Rien à faire côté organisateur : « Mes conférences » affiche « Transcription en cours XX % », puis la page de la conférence montre le panneau de transcription et le bouton de sous-titres du lecteur. Vidéo sans parole détectée : statut `failed` (« Aucune parole détectée »).
+Rien à faire côté organisateur : « Mes conférences » affiche « Transcription en cours XX % », puis la page de la conférence montre le panneau de transcription et le bouton de sous-titres du lecteur. Vidéo sans parole détectée (musique, silence, image fixe) : statut `unavailable`, sans nouvel essai.
 
 ## Debug
 - État de toutes les transcriptions (le conteneur PostgreSQL de l'application est celui qui contient la base `appmajlistv`) :

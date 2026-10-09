@@ -58,3 +58,18 @@ progress { width: 100%; accent-color: var(--accent); }
 .seg:hover { background: #2a2a2a; color: var(--text); }
 .seg.on { background: #0c2a3a; color: var(--text); }
 .seg .ts { color: var(--accent); font-variant-numeric: tabular-nums; margin-inline-end: 8px; font-size: .85em; }
+
+/* Traductions de sous-titres (organisateur) */
+.mine li { gap: 12px; }
+.mine-main { flex: 1; min-width: 0; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; align-items: center; }
+.chip { display: inline-flex; gap: 6px; align-items: center; font-size: 12px; padding: 2px 8px; border-radius: 12px; background: var(--surface); color: var(--muted); }
+.chip.ready { color: var(--text); }
+.chip.processing { color: var(--accent, #38bdf8); }
+.chip.failed { color: #f87171; }
+.chip .link { font-size: 12px; color: inherit; text-decoration: underline; }
+.chips select { width: auto; font-size: 12px; padding: 2px 6px; background: var(--bg); }
+.langs { border: 1px solid #2a2a2a; border-radius: 8px; padding: 12px; display: flex; flex-wrap: wrap; gap: 8px 16px; }
+.langs legend { padding: 0 6px; color: var(--muted); }
+.langs .check { display: flex; align-items: center; gap: 6px; }
+.langs .meta { flex-basis: 100%; margin: 4px 0 0; font-size: 13px; }

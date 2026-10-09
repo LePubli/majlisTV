@@ -2,7 +2,7 @@
 import { useEffect } from 'react';
 
 // Lecteur vidéo : HLS via hls.js (qualité adaptative), lecture native sinon (Safari / iOS).
-// videoRef : ref du parent pour piloter la lecture (transcription cliquable). tracks : [{ lang, label, src }].
+// videoRef : ref du parent pour piloter la lecture (transcription cliquable). tracks : [{ lang, label, src, isDefault }].
 export default function VideoPlayer({ src, poster, tracks = [], videoRef }) {
   useEffect(() => {
     const video = videoRef.current;
@@ -23,7 +23,7 @@ export default function VideoPlayer({ src, poster, tracks = [], videoRef }) {
   }, [src, videoRef]);
   return (
     <video ref={videoRef} controls playsInline controlsList="nodownload" poster={poster || undefined}>
-      {tracks.map((tr) => <track key={tr.lang} kind="subtitles" srcLang={tr.lang} label={tr.label} src={tr.src} />)}
+      {tracks.map((tr) => <track key={tr.lang} kind="subtitles" srcLang={tr.lang} label={tr.label} src={tr.src} default={tr.isDefault || undefined} />)}
     </video>
   );
 }

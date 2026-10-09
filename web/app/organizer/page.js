@@ -4,12 +4,16 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useApp } from '../../components/Providers';
 import { uploadFile } from '../../lib/upload';
+import { langName } from '../../components/Transcript';
 
-const empty = { title: '', description: '', speaker: '', language: 'fr', categoryId: '', access: 'free', videoUrl: '' };
+// Langues de sous-titres proposées (doit correspondre à api/src/langs.js).
+const TR_LANGS = ['ar', 'de', 'en', 'es', 'fr', 'id', 'it', 'nl', 'pt', 'ru', 'tr', 'ur'];
+
+const empty = { title: '', description: '', speaker: '', language: 'fr', categoryId: '', access: 'free', videoUrl: '', translateTo: [] };
 
 // Espace organisateur : ajout (lien YouTube/Vimeo ou fichier vidéo) et suppression de ses conférences.
 export default function Organizer() {
-  const { user, ready, t, call } = useApp();
+  const { user, ready, t, call, locale } = useApp();
   const router = useRouter();
   const [f, setF] = useState(empty);
   const [mode, setMode] = useState('link');
@@ -20,11 +24,15 @@ export default function Organizer() {
   const [err, setErr] = useState('');
   const allowed = !!user && ['organizer', 'admin'].includes(user.role);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  const toggleLang = (code) => setF({ ...f, translateTo: f.translateTo.includes(code) ? f.translateTo.filter((c) => c !== code) : [...f.translateTo, code] });
+  const srcLang = (code) => String(code || '').split('-')[0].toLowerCase();
   const load = useCallback(() => call('/me/talks').then((r) => r.ok && setMine(r.data)), [call]);
 
   // Rafraîchit la liste tant qu'une conversion est en cours.
+  const busyTr = (x) => (x.translations || []).some((tr) => ['pending', 'processing'].includes(tr.status));
   const converting = mine.some((x) => ['pending', 'processing'].includes(x.status)
-    || (x.status === 'ready' && ['pending', 'processing'].includes(x.transcriptStatus)));
+    || (x.status === 'ready' && ['pending', 'processing'].includes(x.transcriptStatus))
+    || (x.transcriptStatus === 'ready' && busyTr(x)));
   useEffect(() => {
     if (!converting) return;
     const id = setInterval(load, 5000);
@@ -48,10 +56,12 @@ export default function Organizer() {
     e.preventDefault();
     setErr('');
     const body = { ...f, categoryId: f.categoryId ? Number(f.categoryId) : undefined };
+    if (mode !== 'file') delete body.translateTo;
     try {
       if (mode === 'file') {
         if (!file) return;
         delete body.videoUrl;
+        body.translateTo = f.translateTo.filter((c) => c !== srcLang(f.language));
         setProgress(0);
         body.uploadId = await uploadFile(file, call, setProgress);
       }
@@ -63,6 +73,9 @@ export default function Organizer() {
     setProgress(null);
   };
   const remove = async (id) => { await call('/talks/' + id, { method: 'DELETE' }); load(); };
+  const addTr = async (id, lang) => { if (lang) { await call(`/talks/${id}/translations`, { method: 'POST', body: JSON.stringify({ lang }) }); load(); } };
+  const removeTr = async (id, lang) => { await call(`/talks/${id}/translations/${lang}`, { method: 'DELETE' }); load(); };
+  const trState = (tr) => (tr.status === 'ready' ? '✓' : tr.status === 'processing' ? `${tr.progress} %` : tr.status === 'failed' ? '⚠' : t('trWaiting'));
 
   if (!user) return null;
   if (!allowed) return <main className="card"><p>{t('noAccess')}</p></main>;
@@ -97,6 +110,15 @@ export default function Organizer() {
             <option value="premium">{t('premium')}</option>
           </select>
         </label>
+        {mode === 'file' && (
+          <fieldset className="langs">
+            <legend>{t('translateTo')}</legend>
+            {TR_LANGS.filter((c) => c !== srcLang(f.language)).map((c) => (
+              <label key={c} className="check"><input type="checkbox" checked={f.translateTo.includes(c)} onChange={() => toggleLang(c)} /> {langName(c, locale)}</label>
+            ))}
+            <p className="meta">{t('translateHint')}</p>
+          </fieldset>
+        )}
         {busy && <><progress value={progress} max="1" /><p className="meta">{t('uploading')} {Math.round(progress * 100)} %</p></>}
         {err && <p className="error">{err}</p>}
         <button className="btn" disabled={busy}>{t('publish')}</button>
@@ -105,8 +127,26 @@ export default function Organizer() {
       <ul className="mine">
         {mine.map((x) => (
           <li key={x.id}>
-            <Link href={`/talks/${x.id}`}>{x.title}</Link>
-            {statusLabel(x) && <span className={`status ${x.status === 'failed' || x.transcriptStatus === 'failed' ? 'failed' : ''}`}>{statusLabel(x)}</span>}
+            <div className="mine-main">
+              <Link href={`/talks/${x.id}`}>{x.title}</Link>
+              {statusLabel(x) && <span className={`status ${x.status === 'failed' || x.transcriptStatus === 'failed' ? 'failed' : ''}`}>{statusLabel(x)}</span>}
+              {x.source === 'upload' && x.status === 'ready' && x.transcriptStatus !== 'unavailable' && x.transcriptStatus !== 'failed' && (
+                <div className="chips">
+                  {(x.translations || []).map((tr) => (
+                    <span key={tr.lang} className={`chip ${tr.status}`}>
+                      {langName(tr.lang, locale)} · {trState(tr)}
+                      {tr.status === 'failed' && <button className="link" onClick={() => addTr(x.id, tr.lang)}>{t('retryTr')}</button>}
+                      {['ready', 'failed'].includes(tr.status) && <button className="link" aria-label={t('removeTr')} title={t('removeTr')} onClick={() => removeTr(x.id, tr.lang)}>×</button>}
+                    </span>
+                  ))}
+                  <select value="" onChange={(e) => addTr(x.id, e.target.value)} aria-label={t('addLang')}>
+                    <option value="">{t('addLang')}</option>
+                    {TR_LANGS.filter((c) => c !== srcLang(x.transcriptLanguage || x.language) && !(x.translations || []).some((tr) => tr.lang === c))
+                      .map((c) => <option key={c} value={c}>{langName(c, locale)}</option>)}
+                  </select>
+                </div>
+              )}
+            </div>
             <button className="link" onClick={() => remove(x.id)}>{t('delete')}</button>
           </li>
         ))}

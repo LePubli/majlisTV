@@ -14,8 +14,8 @@ export const langName = (code, locale) => {
 };
 
 // Transcription cliquable : un clic saute à l'instant correspondant, la phrase en cours est surlignée.
-export default function Transcript({ talkId, token, langs, videoRef, locale, t }) {
-  const [lang, setLang] = useState(langs[0]);
+export default function Transcript({ talkId, token, langs, defaultLang, videoRef, locale, t }) {
+  const [lang, setLang] = useState(defaultLang || langs[0]);
   const [data, setData] = useState(null);
   const [active, setActive] = useState(-1);
   const [filter, setFilter] = useState('');

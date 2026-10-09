@@ -16,12 +16,12 @@ export default function TalkPage() {
 
   // Pendant la conversion ou la transcription, la page se met à jour toute seule.
   const waiting = talk && talk.source === 'upload' && !talk.locked
-    && (['pending', 'processing'].includes(talk.status) || ['pending', 'processing'].includes(talk.transcriptStatus));
+    && (['pending', 'processing'].includes(talk.status) || ['pending', 'processing'].includes(talk.transcriptStatus) || talk.translating);
   useEffect(() => {
     if (!waiting) return;
     const timer = setInterval(() => call('/talks/' + id).then((r) => {
       // Ne remplace pas la vidéo en cours de lecture : met à jour seulement les infos de transcription.
-      if (r.ok) setTalk((old) => (old && old.hlsPath && r.data.hlsPath ? { ...old, tracks: r.data.tracks, transcriptStatus: r.data.transcriptStatus } : r.data));
+      if (r.ok) setTalk((old) => (old && old.hlsPath && r.data.hlsPath ? { ...old, tracks: r.data.tracks, transcriptStatus: r.data.transcriptStatus, translating: r.data.translating } : r.data));
     }), 8000);
     return () => clearInterval(timer);
   }, [waiting, id, call]);
@@ -31,8 +31,11 @@ export default function TalkPage() {
   const embed = talk.source === 'youtube'
     ? `https://www.youtube-nocookie.com/embed/${talk.video_ref}`
     : `https://player.vimeo.com/video/${talk.video_ref}`;
+  const audioLang = String(talk.language || '').split('-')[0].toLowerCase();
+  // Sous-titres affichés d'office : la langue de l'interface si elle existe et n'est pas celle de la parole.
+  const subLang = (talk.tracks || []).includes(locale) && locale !== audioLang ? locale : null;
   const tracks = (talk.tracks || []).map((lang) => ({
-    lang, label: langName(lang, locale), src: `/api/talks/${id}/subs/${lang}.vtt?t=${encodeURIComponent(talk.playbackToken)}`,
+    lang, isDefault: lang === subLang, label: langName(lang, locale), src: `/api/talks/${id}/subs/${lang}.vtt?t=${encodeURIComponent(talk.playbackToken)}`,
   }));
 
   let player;
@@ -67,7 +70,7 @@ export default function TalkPage() {
       <p>{talk.description}</p>
       {transcribing && <p className="meta">{t('transcribing')}{talk.transcriptStatus === 'processing' ? ` ${talk.transcriptProgress} %` : ''}</p>}
       {showTranscript && (
-        <Transcript key={talk.tracks.join()} talkId={id} token={talk.playbackToken} langs={talk.tracks} videoRef={videoRef} locale={locale} t={t} />
+        <Transcript key={talk.tracks.join()} talkId={id} token={talk.playbackToken} langs={talk.tracks} defaultLang={talk.tracks.includes(locale) ? locale : (talk.tracks.includes(audioLang) ? audioLang : talk.tracks[0])} videoRef={videoRef} locale={locale} t={t} />
       )}
     </main>
   );
