@@ -15,7 +15,7 @@ export default function Providers({ locale, dict, appName, children }) {
   const call = useCallback(async (path, opts = {}, tk = token) => {
     const res = await fetch('/api' + path, {
       ...opts,
-      headers: { 'Content-Type': 'application/json', ...(tk ? { Authorization: 'Bearer ' + tk } : {}) },
+      headers: { ...(opts.body ? { 'Content-Type': 'application/json' } : {}), ...(tk ? { Authorization: 'Bearer ' + tk } : {}) },
     });
     const data = await res.json().catch(() => ({}));
     return { ok: res.ok, status: res.status, data };

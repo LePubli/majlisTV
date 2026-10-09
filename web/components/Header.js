@@ -20,6 +20,7 @@ export default function Header() {
         </select>
         {ready && (user ? (
           <>
+            {['organizer', 'admin'].includes(user.role) && <Link href="/organizer">{t('myTalks')}</Link>}
             <Link href="/account">{t('account')}</Link>
             <button className="link" onClick={() => { logout(); router.push('/'); }}>{t('logout')}</button>
           </>

@@ -8,6 +8,7 @@ import { config } from './config.js';
 import { pool, migrate, ensureAdmin } from './db.js';
 import authRoutes from './routes/auth.js';
 import adminRoutes from './routes/admin.js';
+import talksRoutes from './routes/talks.js';
 
 const app = Fastify({ logger: true, trustProxy: true });
 
@@ -53,6 +54,7 @@ app.get('/config', async () => ({ appName: config.appName }));
 
 await app.register(authRoutes);
 await app.register(adminRoutes);
+await app.register(talksRoutes);
 
 await migrate();
 await ensureAdmin();

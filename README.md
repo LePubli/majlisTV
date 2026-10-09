@@ -93,3 +93,26 @@ ADMIN_PASSWORD=un_mot_de_passe_long
 - « Deploy blocked: active critical/major incident » : résoudre les incidents actifs dans DockPanel (page Incidents).
 - « Docker Compose refused » : supprimer tout `docker-compose.yml` de la racine du dépôt.
 - Fichiers uploadés plus tard (vidéos) : prévoir un stockage séparé (MinIO), le conteneur Git Deploy n'a pas de stockage persistant.
+
+## Étape 2A : conférences (liens YouTube/Vimeo), catalogue, espace organisateur
+Nouveautés API (migration `002_talks.sql` appliquée automatiquement au démarrage) :
+- `GET /categories`, `POST /categories` (admin)
+- `GET /talks?q=mot&category=ID&limit=24&offset=0` (public), `GET /talks/:id` (public)
+- `POST /talks` (organisateur/admin), `GET /me/talks`, `DELETE /talks/:id` (propriétaire ou admin)
+
+Nouveautés site : catalogue avec recherche et filtre par catégorie, page de lecture (`/talks/ID`), espace `/organizer`.
+
+Déploiement : push sur `main`, puis **Deploy Now** sur `majlistv-api` ET sur `majlistv-web` (aucune variable à changer).
+
+Tester :
+1. Donner le rôle organisateur à ton compte de test (connecté en admin) :
+```bash
+TOKEN=$(curl -s -X POST https://api-majlisstv.le-publicitaire.fr/auth/login -H 'Content-Type: application/json' \
+  -d '{"email":"ADMIN_EMAIL","password":"ADMIN_PASSWORD"}' | sed 's/.*"token":"\([^"]*\)".*/\1/')
+curl https://api-majlisstv.le-publicitaire.fr/admin/users -H "Authorization: Bearer $TOKEN"
+curl -X PATCH https://api-majlisstv.le-publicitaire.fr/admin/users/ID_UTILISATEUR/role \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"role":"organizer"}'
+```
+2. Se reconnecter avec ce compte : le lien « Mes conférences » apparaît. Ajouter une conférence avec un lien YouTube, puis vérifier le catalogue.
+
+Limites de cette étape : l'accès « premium » est seulement un marquage (le blocage viendra avec l'abonnement), les catégories sont en français, et la miniature n'existe que pour YouTube.
