@@ -12,6 +12,7 @@ import subprocess
 import sys
 import threading
 import time
+from urllib.parse import unquote, urlsplit
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import boto3
@@ -60,10 +61,20 @@ def log(*args):
 _conn = None
 
 
+def conn_params(url):
+    """Décompose DATABASE_URL comme le fait l'API (dernier « @ » = séparateur), au lieu de laisser libpq
+    l'interpréter : un mot de passe contenant « @ » ou des caractères encodés (%40) fonctionne ainsi dans les deux."""
+    u = urlsplit(url)
+    return {
+        "host": u.hostname, "port": u.port or 5432, "dbname": unquote(u.path.lstrip("/")),
+        "user": unquote(u.username or ""), "password": unquote(u.password or ""), "client_encoding": "UTF8",
+    }
+
+
 def db():
     global _conn
     if _conn is None or _conn.closed:
-        _conn = psycopg2.connect(DATABASE_URL, client_encoding="UTF8")
+        _conn = psycopg2.connect(**conn_params(DATABASE_URL))
         _conn.autocommit = True
     return _conn
 
