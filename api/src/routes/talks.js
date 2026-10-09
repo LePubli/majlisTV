@@ -46,7 +46,8 @@ const talkSchema = z.object({
 
 const SELECT = `SELECT t.id, t.title, t.description, t.speaker, t.language, t.access, t.source,
   t.video_ref, t.category_id, c.name AS category, t.created_at,
-  t.video_status AS status, t.video_progress AS progress, t.duration_seconds AS "durationSeconds", t.poster_key
+  t.video_status AS status, t.video_progress AS progress, t.duration_seconds AS "durationSeconds", t.poster_key,
+  t.transcript_status AS "transcriptStatus", t.transcript_progress AS "transcriptProgress"
   FROM talks t LEFT JOIN categories c ON c.id = t.category_id`;
 
 // Remplace poster_key par un lien de miniature temporaire.
@@ -82,7 +83,8 @@ export default async function talksRoutes(app) {
       `${SELECT}
        WHERE t.video_status = 'ready'
          AND ($1::text IS NULL OR t.title ILIKE '%' || $1 || '%' OR t.speaker ILIKE '%' || $1 || '%'
-              OR t.description ILIKE '%' || $1 || '%')
+              OR t.description ILIKE '%' || $1 || '%'
+              OR t.transcript_text ILIKE '%' || $1 || '%')
          AND ($2::int IS NULL OR t.category_id = $2)
        ORDER BY t.created_at DESC LIMIT $3 OFFSET $4`,
       [p.q ?? null, p.category ?? null, p.limit, p.offset]
@@ -103,8 +105,14 @@ export default async function talksRoutes(app) {
       const isOwner = viewer && (viewer.role === 'admin' || viewer.sub === owner.rows[0].organizer_id);
       const allowed = talk.access === 'free' || isOwner;
       if (!allowed) talk.locked = true;
-      else if (talk.status === 'ready') talk.hlsPath = `/hls/${id}/master.m3u8?t=${encodeURIComponent(makePlaybackToken(id))}`;
-      else if (isOwner) talk.videoUrl = await presignGet(talk.video_ref); // aperçu du fichier d'origine pendant la conversion
+      else {
+        // Jeton de lecture : flux HLS, transcription et sous-titres.
+        talk.playbackToken = makePlaybackToken(id);
+        const langs = await pool.query('SELECT DISTINCT lang FROM transcript_segments WHERE talk_id = $1 ORDER BY lang', [id]);
+        talk.tracks = langs.rows.map((r) => r.lang);
+        if (talk.status === 'ready') talk.hlsPath = `/hls/${id}/master.m3u8?t=${encodeURIComponent(talk.playbackToken)}`;
+        else if (isOwner) talk.videoUrl = await presignGet(talk.video_ref); // aperçu du fichier d'origine pendant la conversion
+      }
       delete talk.video_ref;
     }
     await withPosters([talk]);
@@ -134,10 +142,10 @@ export default async function talksRoutes(app) {
     }
     try {
       const { rows } = await pool.query(
-        `INSERT INTO talks(organizer_id, title, description, speaker, language, category_id, access, source, video_ref, video_status)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
+        `INSERT INTO talks(organizer_id, title, description, speaker, language, category_id, access, source, video_ref, video_status, transcript_status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
         [req.user.sub, b.title, b.description, b.speaker, b.language, b.categoryId ?? null, b.access, video.source, video.ref,
-          video.source === 'upload' ? 'pending' : 'ready']
+          video.source === 'upload' ? 'pending' : 'ready', video.source === 'upload' ? 'pending' : 'unavailable']
       );
       return reply.code(201).send(rows[0]);
     } catch (err) {

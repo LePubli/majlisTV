@@ -11,6 +11,7 @@ import adminRoutes from './routes/admin.js';
 import talksRoutes from './routes/talks.js';
 import uploadRoutes from './routes/uploads.js';
 import hlsRoutes from './routes/hls.js';
+import transcriptRoutes from './routes/transcripts.js';
 import { ensureCors } from './storage.js';
 
 const app = Fastify({ logger: true, trustProxy: true });
@@ -60,6 +61,7 @@ await app.register(adminRoutes);
 await app.register(talksRoutes);
 await app.register(uploadRoutes);
 await app.register(hlsRoutes);
+await app.register(transcriptRoutes);
 
 await migrate();
 await ensureAdmin();

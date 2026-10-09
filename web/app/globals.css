@@ -46,3 +46,15 @@ progress { width: 100%; accent-color: var(--accent); }
 .thumb .dur { position: absolute; right: 8px; bottom: 8px; background: rgba(0,0,0,.75); color: #fff; font-size: 12px; padding: 2px 6px; border-radius: 4px; }
 .mine .status { margin-inline-start: 12px; font-size: 13px; color: var(--accent, #38bdf8); }
 .mine .status.failed { color: #f87171; }
+
+.watch { max-width: 1200px; }
+.transcript { margin-top: 24px; background: var(--surface); border-radius: 8px; padding: 16px; }
+.transcript-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.transcript-head h2 { margin: 0; font-size: 1.1rem; }
+.transcript-head select { width: auto; }
+.transcript input[type=search] { margin: 12px 0; }
+.transcript-body { max-height: 360px; overflow-y: auto; position: relative; }
+.seg { display: block; width: 100%; text-align: start; background: none; border: 0; border-radius: 4px; color: var(--muted); padding: 6px 8px; font: inherit; line-height: 1.5; cursor: pointer; }
+.seg:hover { background: #2a2a2a; color: var(--text); }
+.seg.on { background: #0c2a3a; color: var(--text); }
+.seg .ts { color: var(--accent); font-variant-numeric: tabular-nums; margin-inline-end: 8px; font-size: .85em; }

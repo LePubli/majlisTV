@@ -1,11 +1,11 @@
 'use client';
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 
 // Lecteur vidéo : HLS via hls.js (qualité adaptative), lecture native sinon (Safari / iOS).
-export default function VideoPlayer({ src, poster }) {
-  const ref = useRef(null);
+// videoRef : ref du parent pour piloter la lecture (transcription cliquable). tracks : [{ lang, label, src }].
+export default function VideoPlayer({ src, poster, tracks = [], videoRef }) {
   useEffect(() => {
-    const video = ref.current;
+    const video = videoRef.current;
     if (!video || !src) return;
     let hls;
     let cancelled = false;
@@ -20,6 +20,10 @@ export default function VideoPlayer({ src, poster }) {
       }
     });
     return () => { cancelled = true; if (hls) hls.destroy(); };
-  }, [src]);
-  return <video ref={ref} controls playsInline controlsList="nodownload" poster={poster || undefined} />;
+  }, [src, videoRef]);
+  return (
+    <video ref={videoRef} controls playsInline controlsList="nodownload" poster={poster || undefined}>
+      {tracks.map((tr) => <track key={tr.lang} kind="subtitles" srcLang={tr.lang} label={tr.label} src={tr.src} />)}
+    </video>
+  );
 }

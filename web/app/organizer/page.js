@@ -23,7 +23,8 @@ export default function Organizer() {
   const load = useCallback(() => call('/me/talks').then((r) => r.ok && setMine(r.data)), [call]);
 
   // Rafraîchit la liste tant qu'une conversion est en cours.
-  const converting = mine.some((x) => ['pending', 'processing'].includes(x.status));
+  const converting = mine.some((x) => ['pending', 'processing'].includes(x.status)
+    || (x.status === 'ready' && ['pending', 'processing'].includes(x.transcriptStatus)));
   useEffect(() => {
     if (!converting) return;
     const id = setInterval(load, 5000);
@@ -31,7 +32,10 @@ export default function Organizer() {
   }, [converting, load]);
   const statusLabel = (x) => (x.status === 'pending' ? t('queued')
     : x.status === 'processing' ? `${t('converting')} ${x.progress} %`
-    : x.status === 'failed' ? t('convFailed') : '');
+    : x.status === 'failed' ? t('convFailed')
+    : x.transcriptStatus === 'pending' ? `${t('transcribingList')} : ${t('queued').toLowerCase()}`
+    : x.transcriptStatus === 'processing' ? `${t('transcribing')} ${x.transcriptProgress} %`
+    : x.transcriptStatus === 'failed' ? t('transcriptFailed') : '');
 
   useEffect(() => { if (ready && !user) router.replace('/login'); }, [ready, user, router]);
   useEffect(() => {
@@ -102,7 +106,7 @@ export default function Organizer() {
         {mine.map((x) => (
           <li key={x.id}>
             <Link href={`/talks/${x.id}`}>{x.title}</Link>
-            {statusLabel(x) && <span className={`status ${x.status}`}>{statusLabel(x)}</span>}
+            {statusLabel(x) && <span className={`status ${x.status === 'failed' || x.transcriptStatus === 'failed' ? 'failed' : ''}`}>{statusLabel(x)}</span>}
             <button className="link" onClick={() => remove(x.id)}>{t('delete')}</button>
           </li>
         ))}
